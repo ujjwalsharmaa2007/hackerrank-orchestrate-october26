@@ -106,7 +106,8 @@ def generate_output(evaluate_case):
     print(f"Output: {output_path}")
 
 
+
 if __name__ == "__main__":
-    print("Submission generator loaded successfully.")
-    print("Cases available:", len(load_requests()))
-    print("Evidence-based evaluator still needs to be connected.")
+    from case_evaluator import evaluate_case
+
+    generate_output(evaluate_case)

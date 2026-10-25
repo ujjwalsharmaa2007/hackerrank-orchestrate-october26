@@ -89,6 +89,8 @@ def category_from_collection(collection_name):
         "security_audit_events": "SECURITY_AUDIT_LOG",
         "customer_search_documents": "SEARCH_INDEX_ENTRY",
         "support_conversations": "SUPPORT_MESSAGE",
+        "customer_profiles_primary": "USER_PROFILE",
+        "customer_profiles_failover_replica": "USER_PROFILE",
     }
 
     return mapping.get(collection_name)

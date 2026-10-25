@@ -4,23 +4,24 @@ import json
 import sqlite3
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent.parent
 DATASET = ROOT / "dataset"
 
 
-def load_sql_evidence(evidence_id):
+def load_evidence_index():
     with (DATASET / "evidence_files.csv").open(
         encoding="utf-8-sig", newline=""
     ) as file:
-        evidence_files = list(csv.DictReader(file))
+        return list(csv.DictReader(file))
 
+
+def load_sql_evidence(evidence_id):
     item = next(
         (
-            row for row in evidence_files
+            row for row in load_evidence_index()
             if row["file_id"] == evidence_id
         ),
-        None
+        None,
     )
 
     if item is None:
@@ -32,6 +33,7 @@ def load_sql_evidence(evidence_id):
         raise ValueError("Evidence file is not SQL")
 
     connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
 
     try:
         connection.executescript(
@@ -49,27 +51,43 @@ def load_sql_evidence(evidence_id):
         records = []
 
         for table in tables:
-            if table not in {
-                "customer_data_primary",
-                "customer_data_read_replica",
-            }:
-                continue
-
             rows = connection.execute(
-                f'SELECT resource_id, origin_system, '
-                f'collection_name, record_json, updated_at '
-                f'FROM "{table}"'
+                f'SELECT * FROM "{table}"'
             )
 
             for row in rows:
+                raw = dict(row)
+
+                if "record_json" in raw:
+                    try:
+                        record = json.loads(raw["record_json"])
+                    except (ValueError, TypeError):
+                        record = raw
+                else:
+                    record = raw
+
+                resource_id = (
+                    raw.get("resource_id")
+                    or record.get("resource_id")
+                )
+
+                if not resource_id:
+                    continue
+
                 records.append({
                     "evidence_id": evidence_id,
                     "table": table,
-                    "resource_id": row[0],
-                    "origin_system": row[1],
-                    "collection_name": row[2],
-                    "record": json.loads(row[3]),
-                    "updated_at": row[4],
+                    "resource_id": resource_id,
+                    "origin_system": (
+                        raw.get("origin_system")
+                        or table
+                    ),
+                    "collection_name": (
+                        raw.get("collection_name")
+                        or table
+                    ),
+                    "record": record,
+                    "updated_at": raw.get("updated_at", ""),
                     "captured_at": item["captured_at"],
                 })
 
@@ -106,24 +124,54 @@ def find_user_records(evidence_id, user_ids, emails):
 
         return False
 
-    matches = []
-
-    for record in records:
-        if contains_identifier(record["record"]):
-            matches.append(record)
-
-    return matches
+    return [
+        record for record in records
+        if contains_identifier(record["record"])
+    ]
 
 
-if __name__ == "__main__":
-    records = load_sql_evidence("evidence_05")
-
-    print("Evidence:", "evidence_05")
-    print("Records loaded:", len(records))
-
-    for record in records[:3]:
-        print(
-            "Resource:", record["resource_id"],
-            "| System:", record["origin_system"],
-            "| Collection:", record["collection_name"],
+def select_sql_evidence(audit_at):
+    eligible = [
+        item
+        for item in load_evidence_index()
+        if (
+            item["file_path"].lower().endswith(".sql")
+            and item["captured_at"] <= audit_at
         )
+    ]
+
+    if not eligible:
+        return None
+
+    selected = max(
+        eligible,
+        key=lambda item: item["captured_at"]
+    )
+
+    return selected["file_id"]
+
+
+def find_user_records_across_snapshots(audit_at, user_ids, emails):
+    eligible = [
+        item
+        for item in load_evidence_index()
+        if (
+            item["file_path"].lower().endswith(".sql")
+            and item["captured_at"] <= audit_at
+        )
+    ]
+
+    eligible.sort(key=lambda item: item["captured_at"])
+
+    all_records = []
+
+    for item in eligible:
+        records = find_user_records(
+            item["file_id"],
+            user_ids,
+            emails
+        )
+
+        all_records.extend(records)
+
+    return all_records

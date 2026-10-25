@@ -10,6 +10,25 @@ def evaluate_resource(resource, audit_at):
     resource_id = resource["resource_id"]
     collection = resource["collection_name"]
 
+    # Handle active data flows separately
+    if collection == "connector_configurations":
+        enabled = resource["record"].get("enabled", False)
+
+        if enabled:
+            return {
+                "resource_id": resource_id,
+                "status": "INCOMPLETE",
+                "required_action": "DISABLE_FLOW",
+                "reason": "Continuous data flow is enabled",
+            }
+
+        return {
+            "resource_id": resource_id,
+            "status": "REPORTED_SUCCESS",
+            "required_action": "DISABLE_FLOW",
+            "reason": "Data flow is disabled in the snapshot",
+        }
+
     category = category_from_collection(collection)
 
     if category is None:
